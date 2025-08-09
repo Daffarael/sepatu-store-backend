@@ -1,4 +1,5 @@
-const { Product, ProductImage } = require('../models'); // Impor dari index.js
+const { Product, ProductImage } = require('../models');
+const { Op } = require('sequelize'); // Impor operator Sequelize
 
 // --- FUNGSI CREATE PRODUCT ---
 const createProduct = async (req, res) => {
@@ -36,22 +37,56 @@ const createProduct = async (req, res) => {
   }
 };
 
-// --- FUNGSI MENAMPILKAN SEMUA PRODUK ---
+// --- FUNGSI MENAMPILKAN SEMUA PRODUK (DENGAN SEARCH, FILTER, SORT, PAGINATION) ---
 const getAllProducts = async (req, res) => {
     try {
-        const products = await Product.findAll({
-            where: {
-                is_deleted: false,
-                status: 'Active'
-            },
+        const { search, category, sortBy, order, page, limit } = req.query;
+
+        // 1. Filter & Search
+        const whereClause = {
+            is_deleted: false,
+            status: 'Active'
+        };
+        if (search) {
+            whereClause.name = { [Op.like]: `%${search}%` };
+        }
+        if (category) {
+            whereClause.category = category;
+        }
+
+        // 2. Sort
+        const orderClause = [];
+        if (sortBy && order) {
+            orderClause.push([sortBy, order.toUpperCase()]);
+        } else {
+            orderClause.push(['createdAt', 'DESC']); // Default sort
+        }
+
+        // 3. Pagination
+        const pageNum = parseInt(page, 10) || 1;
+        const limitNum = parseInt(limit, 10) || 10;
+        const offset = (pageNum - 1) * limitNum;
+
+        // Eksekusi query dengan semua opsi
+        const { count, rows } = await Product.findAndCountAll({
+            where: whereClause,
             include: {
                 model: ProductImage,
                 as: 'images',
                 attributes: ['id', 'image_url'],
-            }
+            },
+            order: orderClause,
+            limit: limitNum,
+            offset: offset,
         });
 
-        res.status(200).json(products);
+        res.status(200).json({
+            totalItems: count,
+            totalPages: Math.ceil(count / limitNum),
+            currentPage: pageNum,
+            products: rows
+        });
+
     } catch (error) {
         res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
     }
@@ -114,17 +149,16 @@ const updateProduct = async (req, res) => {
     }
 };
 
-// --- FUNGSI BARU: SOFT DELETE PRODUK ---
+// --- FUNGSI SOFT DELETE PRODUK ---
 const deleteProduct = async (req, res) => {
     try {
-        const { id } = req.params; // Ambil ID produk dari URL
+        const { id } = req.params;
 
         const product = await Product.findByPk(id);
         if (!product) {
             return res.status(404).json({ message: 'Produk tidak ditemukan.' });
         }
 
-        // Lakukan soft delete dengan mengubah status is_deleted
         product.is_deleted = true;
         await product.save();
 
@@ -135,12 +169,11 @@ const deleteProduct = async (req, res) => {
     }
 };
 
-
 // Ekspor semua fungsi
 module.exports = {
   createProduct,
   getAllProducts,
   getProductById,
   updateProduct,
-  deleteProduct, // <-- Jangan lupa tambahkan fungsi baru
+  deleteProduct,
 };

@@ -11,7 +11,7 @@ const getUserProfile = (req, res) => {
   });
 };
 
-// Fungsi untuk mendapatkan semua pengguna (khusus admin) (BARU)
+// Fungsi untuk mendapatkan semua pengguna (khusus admin)
 const getAllUsers = async (req, res) => {
   try {
     const users = await User.findAll({

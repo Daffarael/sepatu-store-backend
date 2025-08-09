@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const emailConfig = require('../config/emailConfig');
 
 // --- FUNGSI 1: REGISTER ---
 const register = async (req, res) => {
@@ -20,7 +21,7 @@ const register = async (req, res) => {
     }
 
     let role = 'user';
-    const MASTER_SECRET_CODE = 'MetriKeren';
+    const MASTER_SECRET_CODE = process.env.ADMIN_SECRET_CODE;
 
     if (adminSecretCode) {
       if (adminSecretCode === MASTER_SECRET_CODE) {
@@ -67,7 +68,7 @@ const login = async (req, res) => {
       return res.status(401).json({ message: 'Password salah' });
     }
 
-    const secretKey = 'kunci_rahasia_super_aman';
+    const secretKey = process.env.JWT_SECRET_KEY;
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       secretKey,
@@ -77,6 +78,12 @@ const login = async (req, res) => {
     res.status(200).json({
       message: 'Login berhasil!',
       token: token,
+      user: {
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role
+      }
     });
 
   } catch (error) {
@@ -84,7 +91,7 @@ const login = async (req, res) => {
   }
 };
 
-// --- FUNGSI 3: FORGOT PASSWORD (DENGAN PERBAIKAN FINAL) ---
+// --- FUNGSI 3: FORGOT PASSWORD (MENGIRIM KODE) ---
 const forgotPassword = async (req, res) => {
   try {
     const user = await User.findOne({ where: { email: req.body.email } });
@@ -94,71 +101,96 @@ const forgotPassword = async (req, res) => {
 
     const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
     user.resetPasswordToken = crypto.createHash('sha256').update(resetCode).digest('hex');
-    user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
+    user.resetPasswordExpires = Date.now() + 1 * 60 * 1000; // Berlaku 1 menit
     await user.save();
 
-    // --- PERBAIKAN DI SINI: OTOMATIS MEMBUAT AKUN TES ---
-    nodemailer.createTestAccount(async (err, account) => {
-        if (err) {
-            console.error('Gagal membuat akun tes Ethereal:', err);
-            return res.status(500).json({ message: 'Gagal membuat akun tes email.' });
-        }
-
-        let transporter = nodemailer.createTransport({
-            host: account.smtp.host,
-            port: account.smtp.port,
-            secure: account.smtp.secure,
-            auth: {
-                user: account.user, // Gunakan user dari akun tes
-                pass: account.pass, // Gunakan password dari akun tes
-            },
-        });
-
-        const message = `Anda meminta reset password. Gunakan kode verifikasi ini untuk melanjutkan. Kode ini hanya berlaku 10 menit.\n\nKode Anda: ${resetCode}`;
-
-        const info = await transporter.sendMail({
-            from: '"Sepatu Store" <noreply@sepatustore.com>',
-            to: user.email,
-            subject: 'Kode Reset Password',
-            text: message,
-        });
-
-        console.log("Email terkirim. URL Preview: %s", nodemailer.getTestMessageUrl(info));
-        res.status(200).json({ message: 'Kode reset telah dikirim ke email Anda.' });
+    let transporter = nodemailer.createTransport({
+      service: emailConfig.service,
+      auth: {
+        user: emailConfig.auth.user,
+        pass: emailConfig.auth.pass,
+      },
     });
+
+    const message = `Anda meminta reset password. Gunakan kode verifikasi ini untuk melanjutkan. Kode ini hanya berlaku 1 menit.\n\nKode Anda: ${resetCode}`;
+    
+    await transporter.sendMail({
+      from: `"Sepatu Store" <${emailConfig.auth.user}>`,
+      to: user.email,
+      subject: 'Kode Reset Password',
+      text: message,
+    });
+    
+    console.log(`Email reset berhasil dikirim ke: ${user.email}`);
+    res.status(200).json({ message: 'Kode reset telah dikirim ke email Anda.' });
 
   } catch (error) {
     console.error('Error di fungsi forgotPassword:', error);
-    res.status(500).json({ message: 'Terjadi kesalahan.' });
+    res.status(500).json({ message: 'Gagal mengirim email. Periksa konfigurasi .env dan App Password Anda.' });
   }
 };
 
-// --- FUNGSI 4: RESET PASSWORD ---
+// --- FUNGSI 4: VERIFIKASI KODE ---
+const verifyCode = async (req, res) => {
+    try {
+        const { code } = req.body;
+        if (!code) {
+            return res.status(400).json({ message: 'Kode harus diisi.' });
+        }
+
+        const hashedCode = crypto.createHash('sha256').update(code).digest('hex');
+
+        const user = await User.findOne({
+            where: {
+                resetPasswordToken: hashedCode,
+                resetPasswordExpires: { [require('sequelize').Op.gt]: Date.now() }
+            }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Kode tidak valid atau sudah kedaluwarsa.' });
+        }
+        
+        const resetAuthToken = jwt.sign(
+            { userId: user.id, purpose: 'password-reset' },
+            process.env.JWT_RESET_SECRET_KEY,
+            { expiresIn: '5m' }
+        );
+        
+        user.resetPasswordToken = null;
+        user.resetPasswordExpires = null;
+        await user.save();
+
+        res.status(200).json({
+            message: 'Kode berhasil diverifikasi.',
+            resetAuthToken: resetAuthToken,
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Terjadi kesalahan' });
+    }
+};
+
+// --- FUNGSI 5: RESET PASSWORD ---
 const resetPassword = async (req, res) => {
     try {
-        const { email, code, password, confirmPassword } = req.body;
-
-        if (!email || !code || !password || !confirmPassword) {
-            return res.status(400).json({ message: 'Semua field harus diisi.' });
+        const { password, confirmPassword } = req.body;
+        
+        if (!password || !confirmPassword) {
+            return res.status(400).json({ message: 'Password baru dan konfirmasi harus diisi.' });
         }
         if (password !== confirmPassword) {
             return res.status(400).json({ message: 'Password dan Konfirmasi Password tidak cocok.' });
         }
 
-        const user = await User.findOne({ where: { email } });
+        const userId = req.user.userId;
+        const user = await User.findByPk(userId);
+
         if (!user) {
-            return res.status(400).json({ message: 'Email tidak terdaftar.' });
+            return res.status(404).json({ message: 'User tidak ditemukan.' });
         }
 
-        const hashedCode = crypto.createHash('sha256').update(code).digest('hex');
-
-        if (user.resetPasswordToken !== hashedCode || user.resetPasswordExpires < Date.now()) {
-            return res.status(400).json({ message: 'Kode tidak valid atau sudah kedaluwarsa.' });
-        }
-        
         user.password = await bcrypt.hash(password, 10);
-        user.resetPasswordToken = null;
-        user.resetPasswordExpires = null;
         await user.save();
 
         res.status(200).json({ message: 'Password berhasil diubah!' });
@@ -173,5 +205,6 @@ module.exports = {
   register,
   login,
   forgotPassword,
+  verifyCode,
   resetPassword,
 };

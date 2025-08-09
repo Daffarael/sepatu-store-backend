@@ -1,10 +1,10 @@
+// src/config/emailConfig.js
+
 const emailConfig = {
-  host: "smtp.ethereal.email",
-  port: 587,
+  service: 'gmail',
   auth: {
-    // --- PASTE KREDENSIAL BARU ANDA DI SINI ---
-    user: 'USERNAME_BARU_DARI_ETHEREAL', 
-    pass: 'PASSWORD_BARU_DARI_ETHEREAL',
+    user: process.env.GMAIL_USER, // Membaca email dari .env
+    pass: process.env.GMAIL_PASS, // Membaca App Password dari .env
   },
 };
 
