@@ -1,201 +1,252 @@
-const { Product, ProductImage } = require('../models');
-const { Op } = require('sequelize'); // Impor operator Sequelize
+// controllers/productController.js
+
+const { Product, ProductImage, ProductVariant } = require('../models');
+const { sequelize } = require('../config/database');
+const { Op } = require('sequelize');
+
+const safeParseJSON = (jsonString) => {
+    try {
+        if (jsonString) {
+            return JSON.parse(jsonString);
+        }
+        return null;
+    } catch (e) {
+        console.error('Gagal mengurai JSON:', e.message);
+        return null;
+    }
+};
 
 // --- FUNGSI CREATE PRODUCT ---
 const createProduct = async (req, res) => {
-  try {
-    const { name, description, price, stock, category, status } = req.body;
+    const t = await sequelize.transaction();
+    try {
+        if (!req.body) {
+            await t.rollback();
+            return res.status(400).json({ message: 'Request body tidak boleh kosong.' });
+        }
+        const {
+            brand, name, description, price, variants, tipe, category,
+            color, 'Material Atas': materialAtas, 'Material Sol': materialSol, 'Kode SKU': kodeSKU
+        } = req.body;
 
-    if (!name || !price || !stock || !category) {
-        return res.status(400).json({ message: 'Nama, harga, stok, dan kategori harus diisi.' });
-    }
-
-    const newProduct = await Product.create({
-      name,
-      description,
-      price,
-      stock,
-      category,
-      status: status || 'Active',
-    });
-
-    if (req.files && req.files.length > 0) {
-      const images = req.files.map(file => ({
-        // --- PERBAIKAN DI SINI ---
-        // Simpan URL yang dapat diakses publik, bukan jalur lokal.
-        image_url: `/uploads/${file.filename}`,
-        // ------------------------
-        productId: newProduct.id,
-      }));
-      await ProductImage.bulkCreate(images);
-    }
-
-    res.status(201).json({
-      message: 'Produk berhasil dibuat',
-      product: newProduct,
-    });
-
-  } catch (error) {
-    res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
-  }
+        if (!brand || !name || !price) {
+            await t.rollback();
+            return res.status(400).json({ message: 'Brand, nama, dan harga harus diisi.' });
+        }
+        const parsedVariants = variants ? safeParseJSON(variants) : null;
+        if (!parsedVariants || !Array.isArray(parsedVariants) || parsedVariants.length === 0) {
+            await t.rollback();
+            return res.status(400).json({ message: 'Varian produk (ukuran/stok) harus diisi dalam format array JSON yang valid.' });
+        }
+        const specificationsObject = {
+            Warna: color || null,
+            "Material Atas": materialAtas || null,
+            "Material Sol": materialSol || null,
+            "Kode SKU": kodeSKU || null
+        };
+        const newProduct = await Product.create({
+            brand, name, description, price,
+            category: category,
+            tipe: tipe,
+            specifications: specificationsObject,
+        }, { transaction: t });
+        const variantData = parsedVariants.map(v => ({
+            size: v.size, stock: v.stock, productId: newProduct.id,
+        }));
+        await ProductVariant.bulkCreate(variantData, { transaction: t });
+        if (req.files && req.files.length > 0) {
+            const images = req.files.map(file => ({
+                image_url: file.path, productId: newProduct.id,
+            }));
+            await ProductImage.bulkCreate(images, { transaction: t });
+        }
+        await t.commit();
+        const createdProductWithDetails = await Product.findByPk(newProduct.id, {
+            include: [
+                { model: ProductVariant, as: 'variants' },
+                { model: ProductImage, as: 'images' }
+            ]
+        });
+        res.status(201).json({
+            message: 'Produk dengan varian berhasil dibuat',
+            product: createdProductWithDetails,
+        });
+    } catch (error) {
+        await t.rollback();
+        console.error('Error saat membuat produk:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
 };
 
-// --- FUNGSI MENAMPILKAN SEMUA PRODUK (DENGAN SEARCH, FILTER, SORT, PAGINATION) ---
+// --- FUNGSI GET ALL PRODUCTS (DENGAN MULTI-FILTER) ---
 const getAllProducts = async (req, res) => {
-    try {
-        const { search, category, minPrice, maxPrice, price, sortBy, order, page, limit } = req.query;
+    try {
+        const { search, category, tipe, minPrice, maxPrice, rating, sortBy, order, page, limit } = req.query;
+        const whereClause = { is_deleted: false, status: 'Active' };
 
-        // 1. Filter & Search
-        const whereClause = {
-            is_deleted: false,
-            status: 'Active'
-        };
+        if (search) { whereClause.name = { [Op.like]: `%${search}%` }; }
+        if (category) { whereClause.category = category; }
+        if (tipe) { whereClause.tipe = tipe; }
+        if (minPrice && maxPrice) { whereClause.price = { [Op.between]: [parseInt(minPrice), parseInt(maxPrice)] }; }
+        if (rating) { whereClause.rating = { [Op.gte]: parseFloat(rating) }; }
 
-        if (search) {
-            whereClause.name = { [Op.like]: `%${search}%` };
-        }
-        if (category) {
-            whereClause.category = category;
-        }
+        const orderClause = sortBy && order ? [[sortBy, order.toUpperCase()]] : [['createdAt', 'DESC']];
+        const pageNum = parseInt(page, 10) || 1;
+        const limitNum = parseInt(limit, 10) || 10;
+        const offset = (pageNum - 1) * limitNum;
 
-        // --- LOGIKA FILTER HARGA ---
-        if (price) {
-            whereClause.price = parseInt(price, 10);
-        } else if (minPrice && maxPrice) {
-            whereClause.price = {
-                [Op.between]: [parseInt(minPrice, 10), parseInt(maxPrice, 10)]
-            };
-        } else if (minPrice) {
-            whereClause.price = {
-                [Op.gte]: parseInt(minPrice, 10)
-            };
-        } else if (maxPrice) {
-            whereClause.price = {
-                [Op.lte]: parseInt(maxPrice, 10)
-            };
-        }
-        // --- AKHIR LOGIKA FILTER HARGA ---
+        const { count, rows } = await Product.findAndCountAll({
+            where: whereClause,
+            include: [{ model: ProductImage, as: 'images', attributes: ['image_url'] }],
+            order: orderClause,
+            limit: limitNum,
+            offset: offset,
+            distinct: true,
+        });
 
-        // 2. Sort
-        const orderClause = [];
-        if (sortBy && order) {
-            orderClause.push([sortBy, order.toUpperCase()]);
-        } else {
-            orderClause.push(['createdAt', 'DESC']); // Default sort
-        }
+        const formattedProducts = rows.map(product => {
+            const productJson = product.toJSON();
+            const mainImage = productJson.images.length > 0
+                ? `${process.env.BASE_URL}/${productJson.images[0].image_url.replace(/\\/g, '/')}`
+                : null;
+            return {
+                id: productJson.id, brand: productJson.brand, name: productJson.name,
+                price: productJson.price, rating: productJson.rating, image: mainImage,
+            };
+        });
 
-        // 3. Pagination
-        const pageNum = parseInt(page, 10) || 1;
-        const limitNum = parseInt(limit, 10) || 10;
-        const offset = (pageNum - 1) * limitNum;
-
-        // Eksekusi query dengan semua opsi
-        const { count, rows } = await Product.findAndCountAll({
-            where: whereClause,
-            include: {
-                model: ProductImage,
-                as: 'images',
-                attributes: ['id', 'image_url'],
-            },
-            order: orderClause,
-            limit: limitNum,
-            offset: offset,
-        });
-
-        res.status(200).json({
-            totalItems: count,
-            totalPages: Math.ceil(count / limitNum),
-            currentPage: pageNum,
-            products: rows
-        });
-
-    } catch (error) {
-        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
-    }
+        res.status(200).json({
+            totalItems: count, totalPages: Math.ceil(count / limitNum),
+            currentPage: pageNum, products: formattedProducts,
+        });
+    } catch (error) {
+        console.error('Error saat mendapatkan semua produk:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
 };
 
-// --- FUNGSI MENAMPILKAN SATU PRODUK BERDASARKAN ID ---
+// --- FUNGSI GET PRODUCT BY ID ---
 const getProductById = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const product = await Product.findOne({
-            where: {
-                id: id,
-                is_deleted: false,
-                status: 'Active'
-            },
-            include: {
-                model: ProductImage,
-                as: 'images',
-                attributes: ['id', 'image_url'],
-            }
-        });
-
-        if (!product) {
-            return res.status(404).json({ message: 'Produk tidak ditemukan.' });
-        }
-
-        res.status(200).json(product);
-    } catch (error) {
-        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
-    }
+    try {
+        const { id } = req.params;
+        const product = await Product.findOne({
+            where: { id: id, is_deleted: false },
+            include: [
+                { model: ProductImage, as: 'images', attributes: ['image_url'] },
+                { model: ProductVariant, as: 'variants', attributes: ['id', 'size', 'stock'] },
+            ],
+        });
+        if (!product) {
+            return res.status(404).json({ message: 'Produk tidak ditemukan.' });
+        }
+        const productJson = product.toJSON();
+        const formattedResponse = {
+            id: productJson.id, brand: productJson.brand, name: productJson.name,
+            price: productJson.price, category: productJson.category, tipe: productJson.tipe,
+            rating: productJson.rating, reviewCount: productJson.reviewCount,
+            sold: productJson.sold, description: productJson.description,
+            imageGallery: productJson.images.map(img => {
+                const correctedPath = img.image_url.replace(/\\/g, '/');
+                return `${process.env.BASE_URL}/${correctedPath}`;
+            }),
+            specifications: productJson.specifications,
+            sizes: productJson.variants.map(v => ({
+                variantId: v.id, size: v.size, stock: v.stock,
+            })),
+        };
+        res.status(200).json(formattedResponse);
+    } catch (error) {
+        console.error('Error saat mendapatkan produk berdasarkan ID:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
 };
 
-// --- FUNGSI UPDATE PRODUK ---
+// --- FUNGSI BARU: MENDAPATKAN SEMUA TIPE UNIK ---
+const getAllTypes = async (req, res) => {
+    try {
+        const types = await Product.findAll({
+            attributes: [
+                [sequelize.fn('DISTINCT', sequelize.col('tipe')), 'name']
+            ],
+            where: {
+                tipe: { [Op.ne]: null },
+                is_deleted: false,
+                status: 'Active'
+            }
+        });
+        const formattedTypes = types.map((item, index) => ({
+            id: index + 1,
+            name: item.getDataValue('name')
+        }));
+        res.status(200).json(formattedTypes);
+    } catch (error) {
+        console.error('Error saat mendapatkan semua tipe:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
+};
+
+
+// --- FUNGSI UPDATE PRODUCT ---
 const updateProduct = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { name, description, price, stock, category, status } = req.body;
+    const t = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const { brand, name, description, price, category, tipe, specifications, variants } = req.body;
+        const product = await Product.findByPk(id, { transaction: t });
+        if (!product) {
+            await t.rollback();
+            return res.status(404).json({ message: 'Produk tidak ditemukan.' });
+        }
+        const parsedSpecifications = specifications ? safeParseJSON(specifications) : product.specifications;
+        const parsedVariants = variants ? safeParseJSON(variants) : null;
 
-        const product = await Product.findByPk(id);
-        if (!product) {
-            return res.status(404).json({ message: 'Produk tidak ditemukan.' });
-        }
+        product.brand = brand || product.brand;
+        product.name = name || product.name;
+        product.description = description || product.description;
+        product.price = price || product.price;
+        product.category = category || product.category;
+        product.tipe = tipe || product.tipe;
+        product.specifications = parsedSpecifications;
+        await product.save({ transaction: t });
 
-        product.name = name || product.name;
-        product.description = description || product.description;
-        product.price = price || product.price;
-        product.stock = stock || product.stock;
-        product.category = category || product.category;
-        product.status = status || product.status;
-
-        await product.save();
-
-        res.status(200).json({
-            message: 'Produk berhasil diperbarui',
-            product: product
-        });
-
-    } catch (error) {
-        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
-    }
+        if (parsedVariants) {
+            await ProductVariant.destroy({ where: { productId: id }, transaction: t });
+            const variantData = parsedVariants.map(v => ({
+                size: v.size, stock: v.stock, productId: id,
+            }));
+            await ProductVariant.bulkCreate(variantData, { transaction: t });
+        }
+        await t.commit();
+        res.status(200).json({ message: 'Produk berhasil diperbarui' });
+    } catch (error) {
+        await t.rollback();
+        console.error('Error saat memperbarui produk:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
 };
 
 // --- FUNGSI SOFT DELETE PRODUK ---
 const deleteProduct = async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const product = await Product.findByPk(id);
-        if (!product) {
-            return res.status(404).json({ message: 'Produk tidak ditemukan.' });
-        }
-
-        product.is_deleted = true;
-        await product.save();
-
-        res.status(200).json({ message: 'Produk berhasil dihapus (soft delete).' });
-
-    } catch (error) {
-        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
-    }
+    try {
+        const { id } = req.params;
+        const product = await Product.findByPk(id);
+        if (!product) {
+            return res.status(404).json({ message: 'Produk tidak ditemukan.' });
+        }
+        product.is_deleted = true;
+        await product.save();
+        res.status(200).json({ message: 'Produk berhasil dihapus (soft delete).' });
+    } catch (error) {
+        console.error('Error saat menghapus produk:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
 };
 
-// Ekspor semua fungsi
 module.exports = {
-  createProduct,
-  getAllProducts,
-  getProductById,
-  updateProduct,
-  deleteProduct,
+    createProduct,
+    getAllProducts,
+    getProductById,
+    updateProduct,
+    deleteProduct,
+    getAllTypes 
 };

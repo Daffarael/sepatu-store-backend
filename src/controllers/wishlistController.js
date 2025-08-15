@@ -1,71 +1,89 @@
+// src/controllers/wishlistController.js
 const { WishlistItem, Product, ProductImage } = require('../models');
 
 // Menambahkan produk ke wishlist
 const addToWishlist = async (req, res) => {
-    try {
-        const userId = req.user.userId; // Diambil dari token setelah login
-        const { productId } = req.body;
+    try {
+        // --- LOG UNTUK DEBUGGING ---
+        console.log("Body yang diterima untuk addToWishlist:", req.body);
 
-        // Cek agar tidak menambah produk yang sama dua kali
-        const existingItem = await WishlistItem.findOne({ where: { userId, productId } });
-        if (existingItem) {
-            return res.status(400).json({ message: 'Produk ini sudah ada di wishlist Anda.' });
-        }
+        const userId = req.user ? (req.user.id || req.user.userId) : null;
+        const { productId } = req.body;
 
-        const wishlistItem = await WishlistItem.create({ userId, productId });
-        res.status(201).json({ message: 'Produk berhasil ditambahkan ke wishlist.', wishlistItem });
+        if (!userId) {
+            return res.status(401).json({ message: 'User tidak terautentikasi.' });
+        }
 
-    } catch (error) {
-        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
-    }
+        const existingItem = await WishlistItem.findOne({ where: { userId, productId } });
+        if (existingItem) {
+            return res.status(400).json({ message: 'Produk ini sudah ada di wishlist Anda.' });
+        }
+
+        const wishlistItem = await WishlistItem.create({ userId, productId });
+        res.status(201).json({ message: 'Produk berhasil ditambahkan ke wishlist.', wishlistItem });
+
+    } catch (error) {
+        // --- LOG UNTUK MENANGKAP ERROR ---
+        console.error("Error di dalam addToWishlist:", error);
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
 };
 
 // Melihat semua isi wishlist pengguna
 const getWishlist = async (req, res) => {
-    try {
-        const userId = req.user.userId;
-        const wishlistItems = await WishlistItem.findAll({
-            where: { userId },
-            include: { // Sertakan detail produk untuk setiap item di wishlist
-                model: Product,
-                attributes: ['id', 'name', 'price'],
-                include: { // Sertakan juga gambar produknya
-                    model: ProductImage,
-                    as: 'images',
-                    attributes: ['image_url'],
-                    limit: 1 // Cukup ambil 1 gambar sebagai thumbnail
-                }
-            }
-        });
-        res.status(200).json(wishlistItems);
-    } catch (error) {
-        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
-    }
+    try {
+        const userId = req.user ? (req.user.id || req.user.userId) : null;
+
+        if (!userId) {
+            return res.status(401).json({ message: 'User tidak terautentikasi.' });
+        }
+
+        const wishlistItems = await WishlistItem.findAll({
+            where: { userId },
+            include: {
+                model: Product,
+                attributes: ['id', 'name', 'price'],
+                include: {
+                    model: ProductImage,
+                    as: 'images',
+                    attributes: ['image_url'],
+                    limit: 1
+                }
+            }
+        });
+        res.status(200).json(wishlistItems);
+    } catch (error) {
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
 };
 
 // Menghapus produk dari wishlist
 const removeFromWishlist = async (req, res) => {
-    try {
-        const userId = req.user.userId;
-        const { productId } = req.params; // Ambil productId dari URL
+    try {
+        const userId = req.user ? (req.user.id || req.user.userId) : null;
+        const { productId } = req.params;
 
-        const result = await WishlistItem.destroy({
-            where: { userId, productId }
-        });
+        if (!userId) {
+            return res.status(401).json({ message: 'User tidak terautentikasi.' });
+        }
 
-        if (result === 0) {
-            return res.status(404).json({ message: 'Produk tidak ditemukan di wishlist Anda.' });
-        }
+        const result = await WishlistItem.destroy({
+            where: { userId, productId }
+        });
 
-        res.status(200).json({ message: 'Produk berhasil dihapus dari wishlist.' });
+        if (result === 0) {
+            return res.status(404).json({ message: 'Produk tidak ditemukan di wishlist Anda.' });
+        }
 
-    } catch (error) {
-        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
-    }
+        res.status(200).json({ message: 'Produk berhasil dihapus dari wishlist.' });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
 };
 
 module.exports = {
-    addToWishlist,
-    getWishlist,
-    removeFromWishlist,
+    addToWishlist,
+    getWishlist,
+    removeFromWishlist,
 };

@@ -1,29 +1,37 @@
 const User = require('../models/User');
 
-// Fungsi untuk mendapatkan profil sendiri
+// --- FUNGSI UNTUK MENDAPATKAN PROFIL SENDIRI (DIPERBAIKI) ---
 const getUserProfile = (req, res) => {
-  res.status(200).json({
-    message: 'Data profil berhasil diambil',
-    user: {
-      userId: req.user.userId,
-      role: req.user.role,
-    },
-  });
+  // req.user sudah berisi data pengguna lengkap dari middleware 'protect'
+  const user = req.user;
+
+  // Kirim kembali data pengguna yang relevan, pastikan password tidak ikut terkirim
+  res.status(200).json({
+    message: 'Data profil berhasil diambil',
+    user: {
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      role: user.role,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt
+    },
+  });
 };
 
-// Fungsi untuk mendapatkan semua pengguna (khusus admin)
+// --- FUNGSI UNTUK ADMIN MENDAPATKAN SEMUA PENGGUNA ---
 const getAllUsers = async (req, res) => {
-  try {
-    const users = await User.findAll({
-      attributes: ['id', 'fullName', 'email', 'role'], // Hanya tampilkan data ini
-    });
-    res.status(200).json(users);
-  } catch (error) {
-    res.status(500).json({ message: 'Terjadi kesalahan pada server' });
-  }
+  try {
+    const users = await User.findAll({
+      attributes: ['id', 'fullName', 'email', 'role', 'createdAt'], // Ditambahkan 'createdAt' untuk tanggal bergabung
+    });
+    res.status(200).json(users);
+  } catch (error) {
+    res.status(500).json({ message: 'Terjadi kesalahan pada server' });
+  }
 };
 
 module.exports = {
-  getUserProfile,
-  getAllUsers,
+  getUserProfile,
+  getAllUsers,
 };

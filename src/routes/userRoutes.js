@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+
 const { getUserProfile, getAllUsers } = require('../controllers/userController');
 const { protect, isAdmin } = require('../middleware/authMiddleware'); // Impor isAdmin
 
