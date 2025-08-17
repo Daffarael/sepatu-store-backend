@@ -27,7 +27,6 @@ const addToCart = async (req, res) => {
             cartItem = await CartItem.create({ userId, productVariantId, quantity });
         }
 
-        // --- PERBAIKAN: Buat objek respons yang bersih ---
         const responseItem = {
             id: cartItem.id,
             quantity: cartItem.quantity,
@@ -44,7 +43,7 @@ const addToCart = async (req, res) => {
     }
 };
 
-// getCart disesuaikan dengan req.user.id
+// getCart disesuaikan dengan alias baru
 const getCart = async (req, res) => {
     try {
         const userId = req.user.id;
@@ -52,7 +51,7 @@ const getCart = async (req, res) => {
             where: { userId },
             include: {
                 model: ProductVariant,
-                as: 'product_variant',
+                as: 'variantDetails', // <-- PERBAIKAN: Menggunakan alias unik yang baru
                 attributes: ['id', 'size', 'stock'],
                 include: {
                     model: Product,
@@ -71,17 +70,17 @@ const getCart = async (req, res) => {
         const formattedCart = cartItems.map(item => ({
             cartItemId: item.id,
             quantity: item.quantity,
-            variantId: item.product_variant.id,
-            size: item.product_variant.size,
-            stock: item.product_variant.stock,
-            price: item.product_variant.product.price,
+            variantId: item.variantDetails.id, // <-- PERBAIKAN: Disesuaikan dengan alias baru
+            size: item.variantDetails.size,
+            stock: item.variantDetails.stock,
+            price: item.variantDetails.product.price,
             product: {
-                id: item.product_variant.product.id,
-                name: item.product_variant.product.name,
-                brand: item.product_variant.product.brand,
-                image: item.product_variant.product.images.length > 0 ? item.product_variant.product.images[0].image_url : null,
+                id: item.variantDetails.product.id,
+                name: item.variantDetails.product.name,
+                brand: item.variantDetails.product.brand,
+                image: item.variantDetails.product.images.length > 0 ? item.variantDetails.product.images[0].image_url : null,
             },
-            subtotal: item.quantity * item.product_variant.product.price,
+            subtotal: item.quantity * item.variantDetails.product.price,
         }));
 
         res.status(200).json(formattedCart);
@@ -114,7 +113,6 @@ const updateCartItem = async (req, res) => {
         cartItem.quantity = quantity;
         await cartItem.save();
 
-        // --- PERBAIKAN: Buat objek respons yang bersih ---
         const responseItem = {
             id: cartItem.id,
             quantity: cartItem.quantity,

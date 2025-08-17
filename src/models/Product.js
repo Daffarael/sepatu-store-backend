@@ -18,11 +18,7 @@ const Product = sequelize.define('Product', {
         type: DataTypes.INTEGER,
         allowNull: false,
     },
-    // --- KOLOM BARU UNTUK KATEGORI PRODUK (SESUAI DOKUMEN) ---
-    category: {
-        type: DataTypes.STRING,
-        allowNull: true, // Bisa diubah menjadi false jika kategori wajib diisi
-    },
+    // Kolom 'category' sudah dihapus
     tipe: {
         type: DataTypes.STRING,
         allowNull: true,

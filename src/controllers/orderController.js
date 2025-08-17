@@ -1,6 +1,5 @@
 // controllers/orderController.js
 
-// PERBAIKAN: Impor sequelize dari config/database, bukan dari models
 const { Order, OrderItem, CartItem, Product, ProductVariant, User } = require('../models');
 const { sequelize } = require('../config/database');
 const { Op } = require('sequelize');
@@ -24,7 +23,7 @@ const createOrder = async (req, res) => {
             where: { userId },
             include: [{
                 model: ProductVariant,
-                as: 'product_variant',
+                as: 'variantDetails', // <-- PERBAIKAN: Menggunakan alias yang benar
                 include: {
                     model: Product,
                     as: 'product'
@@ -40,13 +39,13 @@ const createOrder = async (req, res) => {
 
         let subtotal = 0;
         for (const item of cartItems) {
-            if (item.product_variant.stock < item.quantity) {
+            if (item.variantDetails.stock < item.quantity) { // <-- PERBAIKAN
                 await t.rollback();
                 return res.status(400).json({
-                    message: `Stok untuk produk ${item.product_variant.product.name} (Ukuran ${item.product_variant.size}) tidak mencukupi.`,
+                    message: `Stok untuk produk ${item.variantDetails.product.name} (Ukuran ${item.variantDetails.size}) tidak mencukupi.`,
                 });
             }
-            subtotal += item.quantity * item.product_variant.product.price;
+            subtotal += item.quantity * item.variantDetails.product.price; // <-- PERBAIKAN
         }
 
         const totalPrice = subtotal + shippingFee;
@@ -64,20 +63,18 @@ const createOrder = async (req, res) => {
             orderId: newOrder.id,
             productVariantId: item.productVariantId,
             quantity: item.quantity,
-            price: item.product_variant.product.price,
+            price: item.variantDetails.product.price, // <-- PERBAIKAN
         }));
         await OrderItem.bulkCreate(orderItems, { transaction: t });
 
         for (const item of cartItems) {
             const variant = await ProductVariant.findByPk(item.productVariantId, { transaction: t, lock: true });
             await variant.update({ stock: variant.stock - item.quantity }, { transaction: t });
-
             const product = await Product.findByPk(variant.productId, { transaction: t });
             await product.update({ sold: product.sold + item.quantity }, { transaction: t });
         }
 
         await CartItem.destroy({ where: { userId }, transaction: t });
-
         await t.commit();
         res.status(201).json({ message: 'Pesanan berhasil dibuat.', order: newOrder });
 
@@ -152,7 +149,6 @@ const createDirectOrder = async (req, res) => {
         for (const item of processedItems) {
             const variant = await ProductVariant.findByPk(item.variant.id, { transaction: t, lock: true });
             await variant.update({ stock: variant.stock - item.quantity }, { transaction: t });
-
             const product = await Product.findByPk(variant.productId, { transaction: t });
             await product.update({ sold: product.sold + item.quantity }, { transaction: t });
         }
@@ -174,9 +170,10 @@ const getMyOrders = async (req, res) => {
             include: [
                 {
                     model: OrderItem,
+                    as: 'items', // <-- PERBAIKAN
                     include: {
                         model: ProductVariant,
-                        as: 'product_variant',
+                        as: 'variantDetails', // <-- PERBAIKAN
                         attributes: ['size'],
                         include: {
                             model: Product,
