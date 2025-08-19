@@ -17,6 +17,7 @@ const wishlistRoutes = require('./src/routes/wishlistRoutes');
 const orderRoutes = require('./src/routes/orderRoutes');
 const reviewRoutes = require('./src/routes/reviewRoutes');
 const dashboardRoutes = require('./src/routes/dashboardRoutes'); // Ditambahkan
+const addressRoutes = require('./src/routes/addressRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,7 +25,7 @@ const PORT = process.env.PORT || 3000;
 // --- PERBAIKAN 2: Konfigurasi CORS yang lebih lengkap ---
 const allowedOrigins = [
   'http://localhost:5173', // Alamat frontend lokal
-  'https://a565e9923645.ngrok-free.app' // Alamat Ngrok frontend Anda
+  'https://a565e9923645.ngrok-free.app' // Alamat Ngrok frontend Anda (ganti jika berubah)
 ];
 
 const corsOptions = {
@@ -74,6 +75,7 @@ app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/dashboard', dashboardRoutes); // Rute dasbor ditambahkan
+app.use('/api/addresses', addressRoutes);
 
 // Fungsi untuk memulai server
 const startServer = async () => {
