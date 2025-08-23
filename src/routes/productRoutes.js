@@ -5,14 +5,13 @@ const router = express.Router();
 const path = require('path');
 const multer = require('multer');
 
-// --- PERBAIKAN: Impor fungsi 'getAllTypes' ---
+// Impor fungsi controller, 'getAllTypes' sudah dihapus
 const {
     createProduct,
     getAllProducts,
     getProductById,
     updateProduct,
     deleteProduct,
-    getAllTypes // <-- DITAMBAHKAN
 } = require('../controllers/productController');
 const { protect, isAdmin, optionalProtect } = require('../middleware/authMiddleware');
 
@@ -34,16 +33,14 @@ router.put('/:id', protect, isAdmin, upload.array('images', 5), updateProduct);
 router.delete('/:id', protect, isAdmin, deleteProduct);
 
 
-// --- RUTE PUBLIK DENGAN URUTAN YANG BENAR ---
+// --- RUTE PUBLIK ---
 
-// Rute untuk mendapatkan semua produk (paling umum)
+// Rute untuk mendapatkan semua produk
 router.get('/', getAllProducts);
 
-// --- PERBAIKAN: Rute spesifik '/types' ditempatkan SEBELUM rute dinamis '/:id' ---
-// Rute untuk mendapatkan daftar tipe unik
-router.get('/types', getAllTypes);
+// Rute '/types' telah dihapus dari file ini
 
-// Rute untuk mendapatkan detail produk berdasarkan ID (paling dinamis, jadi ditaruh paling bawah)
+// Rute untuk mendapatkan detail produk berdasarkan ID
 router.get('/:id', optionalProtect, getProductById);
 
 

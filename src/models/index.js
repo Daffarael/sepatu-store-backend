@@ -9,7 +9,8 @@ const WishlistItem = require('./WishlistItem');
 const Order = require('./Order');
 const OrderItem = require('./OrderItem');
 const Review = require('./Review');
-const Address = require('./Address'); // <-- 1. IMPOR MODEL BARU
+const Address = require('./Address');
+const Type = require('./Type'); // DITAMBAHKAN
 
 // Relasi Produk
 Product.hasMany(ProductImage, { foreignKey: 'productId', as: 'images' });
@@ -44,13 +45,17 @@ Review.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 Product.hasMany(Review, { foreignKey: 'productId', as: 'reviews' });
 Review.belongsTo(Product, { foreignKey: 'productId' });
 
-// --- 2. TAMBAHKAN HUBUNGAN BARU UNTUK ALAMAT ---
-User.hasMany(Address, { foreignKey: 'userId', as: 'addresses' });
+// Relasi Alamat
+User.hasOne(Address, { foreignKey: 'userId', as: 'address' }); // Diperbaiki ke hasOne untuk konsistensi
 Address.belongsTo(User, { foreignKey: 'userId' });
 
+// Relasi Tipe dan Produk (DITAMBAHKAN)
+Type.hasMany(Product, { foreignKey: 'typeId' });
+Product.belongsTo(Type, { foreignKey: 'typeId', as: 'type' });
 
-// --- 3. EKSPOR MODEL BARU ---
+
+// Ekspor semua model
 module.exports = {
-  User, Product, ProductImage, ProductVariant, CartItem,
-  WishlistItem, Order, OrderItem, Review, Address
+  User, Product, ProductImage, ProductVariant, CartItem,
+  WishlistItem, Order, OrderItem, Review, Address, Type 
 };

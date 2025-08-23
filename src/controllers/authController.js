@@ -1,3 +1,5 @@
+// controllers/authController.js
+
 const User = require('../models/User');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -53,7 +55,7 @@ const register = async (req, res) => {
     }
 };
 
-// --- FUNGSI 2: LOGIN (DIPERBARUI) ---
+// --- FUNGSI 2: LOGIN (DIPERBARUI DENGAN REFRESH TOKEN) ---
 const login = async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -63,27 +65,37 @@ const login = async (req, res) => {
             return res.status(404).json({ message: 'Email tidak ditemukan' });
         }
 
-        // --- PERBAIKAN: Cek apakah pengguna diblokir ---
         if (user.is_blocked) {
             return res.status(403).json({ message: 'Akun Anda telah diblokir. Silakan hubungi administrator.' });
         }
-        // --- AKHIR PERBAIKAN ---
 
         const isPasswordMatch = await bcrypt.compare(password, user.password);
         if (!isPasswordMatch) {
             return res.status(401).json({ message: 'Password salah' });
         }
 
-        const secretKey = process.env.JWT_SECRET_KEY;
-        const token = jwt.sign(
+        // Buat Access Token (berlaku 15 menit)
+        const accessToken = jwt.sign(
             { userId: user.id, role: user.role },
-            secretKey,
-            { expiresIn: '1h' }
+            process.env.JWT_SECRET_KEY,
+            { expiresIn: '15m' }
         );
+
+        // Buat Refresh Token (berlaku 30 hari)
+        const refreshToken = jwt.sign(
+            { userId: user.id },
+            process.env.JWT_REFRESH_SECRET_KEY, // Pastikan ini ada di .env
+            { expiresIn: '30d' }
+        );
+
+        // Simpan refresh token ke database
+        user.refreshToken = refreshToken;
+        await user.save();
 
         res.status(200).json({
             message: 'Login berhasil!',
-            token: token,
+            accessToken: accessToken,
+            refreshToken: refreshToken,
             user: {
                 id: user.id,
                 fullName: user.fullName,
@@ -97,9 +109,68 @@ const login = async (req, res) => {
     }
 };
 
-// --- (Sisa fungsi lain tidak berubah) ---
+// --- FUNGSI BARU: REFRESH TOKEN ---
+const refreshToken = async (req, res) => {
+    try {
+        const { refreshToken } = req.body;
+        if (!refreshToken) {
+            return res.status(400).json({ message: 'Refresh token diperlukan.' });
+        }
 
-// --- FUNGSI 3: FORGOT PASSWORD (MENGIRIM KODE) ---
+        const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET_KEY);
+        const user = await User.findByPk(decoded.userId);
+
+        // Pastikan refresh token yang dikirim sama dengan yang ada di database
+        if (!user || user.refreshToken !== refreshToken) {
+            return res.status(403).json({ message: 'Refresh token tidak valid.' });
+        }
+
+        // Buat access token baru
+        const newAccessToken = jwt.sign(
+            { userId: user.id, role: user.role },
+            process.env.JWT_SECRET_KEY,
+            { expiresIn: '15m' }
+        );
+
+        res.status(200).json({
+            accessToken: newAccessToken
+        });
+
+    } catch (error) {
+        if (error.name === 'TokenExpiredError') {
+            return res.status(401).json({ message: 'Refresh token kedaluwarsa. Silakan login kembali.' });
+        }
+        return res.status(403).json({ message: 'Gagal merefresh token.', error: error.message });
+    }
+};
+
+// --- FUNGSI BARU: LOGOUT ---
+const logout = async (req, res) => {
+    try {
+        const { refreshToken } = req.body;
+        if (!refreshToken) {
+            return res.status(400).json({ message: 'Refresh token diperlukan.' });
+        }
+
+        const user = await User.findOne({ where: { refreshToken: refreshToken }});
+        if (!user) {
+            // Token sudah tidak valid, anggap sudah logout
+            return res.status(204).send(); 
+        }
+
+        // Hapus refresh token dari database
+        user.refreshToken = null;
+        await user.save();
+        
+        res.status(200).json({ message: 'Logout berhasil.' });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Terjadi kesalahan saat logout.', error: error.message });
+    }
+};
+
+
+// --- FUNGSI LUPA PASSWORD (TETAP SAMA) ---
 const forgotPassword = async (req, res) => {
     try {
         const user = await User.findOne({ where: { email: req.body.email } });
@@ -109,7 +180,7 @@ const forgotPassword = async (req, res) => {
 
         const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
         user.resetPasswordToken = crypto.createHash('sha256').update(resetCode).digest('hex');
-        user.resetPasswordExpires = Date.now() + 1 * 60 * 1000; // Berlaku 1 menit
+        user.resetPasswordExpires = Date.now() + 5 * 60 * 1000; // Berlaku 5 menit
         await user.save();
 
         let transporter = nodemailer.createTransport({
@@ -120,7 +191,7 @@ const forgotPassword = async (req, res) => {
             },
         });
 
-        const message = `Anda meminta reset password. Gunakan kode verifikasi ini untuk melanjutkan. Kode ini hanya berlaku 1 menit.\n\nKode Anda: ${resetCode}`;
+        const message = `Anda meminta reset password. Gunakan kode verifikasi ini untuk melanjutkan. Kode ini hanya berlaku 5 menit.\n\nKode Anda: ${resetCode}`;
 
         await transporter.sendMail({
             from: `"Sepatu Store" <${emailConfig.auth.user}>`,
@@ -138,7 +209,7 @@ const forgotPassword = async (req, res) => {
     }
 };
 
-// --- FUNGSI 4: VERIFIKASI KODE ---
+// --- FUNGSI VERIFIKASI KODE (TETAP SAMA) ---
 const verifyCode = async (req, res) => {
     try {
         const { code } = req.body;
@@ -179,7 +250,7 @@ const verifyCode = async (req, res) => {
     }
 };
 
-// --- FUNGSI 5: RESET PASSWORD ---
+// --- FUNGSI RESET PASSWORD (TETAP SAMA) ---
 const resetPassword = async (req, res) => {
     try {
         const { password, confirmPassword } = req.body;
@@ -212,6 +283,8 @@ const resetPassword = async (req, res) => {
 module.exports = {
     register,
     login,
+    refreshToken,
+    logout,
     forgotPassword,
     verifyCode,
     resetPassword,

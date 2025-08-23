@@ -18,11 +18,7 @@ const Product = sequelize.define('Product', {
         type: DataTypes.INTEGER,
         allowNull: false,
     },
-    // Kolom 'category' sudah dihapus
-    tipe: {
-        type: DataTypes.STRING,
-        allowNull: true,
-    },
+    // Kolom 'tipe' DIHAPUS dari sini karena digantikan oleh relasi ke tabel 'Type'
     rating: {
         type: DataTypes.FLOAT,
         defaultValue: 0,

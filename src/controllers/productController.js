@@ -1,9 +1,10 @@
 // controllers/productController.js
 
-const { Product, ProductImage, ProductVariant } = require('../models');
+const { Product, ProductImage, ProductVariant, Type } = require('../models'); // Ditambahkan 'Type'
 const { sequelize } = require('../config/database');
 const { Op } = require('sequelize');
 
+// Fungsi bantuan untuk mengurai JSON dengan aman
 const safeParseJSON = (jsonString) => {
     try {
         if (jsonString) {
@@ -20,23 +21,19 @@ const safeParseJSON = (jsonString) => {
 const createProduct = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-        if (!req.body) {
-            await t.rollback();
-            return res.status(400).json({ message: 'Request body tidak boleh kosong.' });
-        }
         const {
-            brand, name, description, price, variants, tipe, category,
+            brand, name, description, price, variants, typeId, category,
             color, 'Material Atas': materialAtas, 'Material Sol': materialSol, 'Kode SKU': kodeSKU
         } = req.body;
 
-        if (!brand || !name || !price) {
+        if (!brand || !name || !price || !typeId) {
             await t.rollback();
-            return res.status(400).json({ message: 'Brand, nama, dan harga harus diisi.' });
+            return res.status(400).json({ message: 'Brand, nama, harga, dan typeId harus diisi.' });
         }
         const parsedVariants = variants ? safeParseJSON(variants) : null;
         if (!parsedVariants || !Array.isArray(parsedVariants) || parsedVariants.length === 0) {
             await t.rollback();
-            return res.status(400).json({ message: 'Varian produk (ukuran/stok) harus diisi dalam format array JSON yang valid.' });
+            return res.status(400).json({ message: 'Varian produk (ukuran/stok) harus diisi.' });
         }
         const specificationsObject = {
             Warna: color || null,
@@ -47,24 +44,29 @@ const createProduct = async (req, res) => {
         const newProduct = await Product.create({
             brand, name, description, price,
             category: category,
-            tipe: tipe,
+            typeId: typeId,
             specifications: specificationsObject,
         }, { transaction: t });
+        
         const variantData = parsedVariants.map(v => ({
             size: v.size, stock: v.stock, productId: newProduct.id,
         }));
         await ProductVariant.bulkCreate(variantData, { transaction: t });
+
         if (req.files && req.files.length > 0) {
             const images = req.files.map(file => ({
-                image_url: file.path, productId: newProduct.id,
+                image_url: file.path.replace(/\\/g, '/'),
+                productId: newProduct.id,
             }));
             await ProductImage.bulkCreate(images, { transaction: t });
         }
+
         await t.commit();
         const createdProductWithDetails = await Product.findByPk(newProduct.id, {
             include: [
                 { model: ProductVariant, as: 'variants' },
-                { model: ProductImage, as: 'images' }
+                { model: ProductImage, as: 'images' },
+                { model: Type, as: 'type' }
             ]
         });
         res.status(201).json({
@@ -78,15 +80,15 @@ const createProduct = async (req, res) => {
     }
 };
 
-// --- FUNGSI GET ALL PRODUCTS (DENGAN MULTI-FILTER) ---
+// --- FUNGSI GET ALL PRODUCTS ---
 const getAllProducts = async (req, res) => {
     try {
-        const { search, category, tipe, minPrice, maxPrice, rating, sortBy, order, page, limit } = req.query;
+        const { search, category, typeId, minPrice, maxPrice, rating, sortBy, order, page, limit } = req.query;
         const whereClause = { is_deleted: false, status: 'Active' };
 
         if (search) { whereClause.name = { [Op.like]: `%${search}%` }; }
         if (category) { whereClause.category = category; }
-        if (tipe) { whereClause.tipe = tipe; }
+        if (typeId) { whereClause.typeId = typeId; }
         if (minPrice && maxPrice) { whereClause.price = { [Op.between]: [parseInt(minPrice), parseInt(maxPrice)] }; }
         if (rating) { whereClause.rating = { [Op.gte]: parseFloat(rating) }; }
 
@@ -97,7 +99,10 @@ const getAllProducts = async (req, res) => {
 
         const { count, rows } = await Product.findAndCountAll({
             where: whereClause,
-            include: [{ model: ProductImage, as: 'images', attributes: ['image_url'] }],
+            include: [
+                { model: ProductImage, as: 'images', attributes: ['image_url'], limit: 1 },
+                { model: Type, as: 'type', attributes: ['name'] }
+            ],
             order: orderClause,
             limit: limitNum,
             offset: offset,
@@ -106,18 +111,25 @@ const getAllProducts = async (req, res) => {
 
         const formattedProducts = rows.map(product => {
             const productJson = product.toJSON();
-            const mainImage = productJson.images.length > 0
-                ? `${process.env.BASE_URL}/${productJson.images[0].image_url.replace(/\\/g, '/')}`
+            const mainImage = productJson.images && productJson.images.length > 0
+                ? `${process.env.BASE_URL}/${productJson.images[0].image_url}`
                 : null;
             return {
-                id: productJson.id, brand: productJson.brand, name: productJson.name,
-                price: productJson.price, rating: productJson.rating, image: mainImage,
+                id: productJson.id,
+                brand: productJson.brand,
+                name: productJson.name,
+                price: productJson.price,
+                rating: productJson.rating,
+                image: mainImage,
+                type: productJson.type
             };
         });
 
         res.status(200).json({
-            totalItems: count, totalPages: Math.ceil(count / limitNum),
-            currentPage: pageNum, products: formattedProducts,
+            totalItems: count,
+            totalPages: Math.ceil(count / limitNum),
+            currentPage: pageNum,
+            products: formattedProducts,
         });
     } catch (error) {
         console.error('Error saat mendapatkan semua produk:', error);
@@ -134,21 +146,26 @@ const getProductById = async (req, res) => {
             include: [
                 { model: ProductImage, as: 'images', attributes: ['image_url'] },
                 { model: ProductVariant, as: 'variants', attributes: ['id', 'size', 'stock'] },
+                { model: Type, as: 'type', attributes: ['id', 'name'] }
             ],
         });
         if (!product) {
             return res.status(404).json({ message: 'Produk tidak ditemukan.' });
         }
+        
         const productJson = product.toJSON();
         const formattedResponse = {
-            id: productJson.id, brand: productJson.brand, name: productJson.name,
-            price: productJson.price, category: productJson.category, tipe: productJson.tipe,
-            rating: productJson.rating, reviewCount: productJson.reviewCount,
-            sold: productJson.sold, description: productJson.description,
-            imageGallery: productJson.images.map(img => {
-                const correctedPath = img.image_url.replace(/\\/g, '/');
-                return `${process.env.BASE_URL}/${correctedPath}`;
-            }),
+            id: productJson.id,
+            brand: productJson.brand,
+            name: productJson.name,
+            price: productJson.price,
+            category: productJson.category,
+            rating: productJson.rating,
+            reviewCount: productJson.reviewCount,
+            sold: productJson.sold,
+            description: productJson.description,
+            type: productJson.type,
+            imageGallery: productJson.images.map(img => `${process.env.BASE_URL}/${img.image_url}`),
             specifications: productJson.specifications,
             sizes: productJson.variants.map(v => ({
                 variantId: v.id, size: v.size, stock: v.stock,
@@ -161,61 +178,51 @@ const getProductById = async (req, res) => {
     }
 };
 
-// --- FUNGSI BARU: MENDAPATKAN SEMUA TIPE UNIK ---
-const getAllTypes = async (req, res) => {
-    try {
-        const types = await Product.findAll({
-            attributes: [
-                [sequelize.fn('DISTINCT', sequelize.col('tipe')), 'name']
-            ],
-            where: {
-                tipe: { [Op.ne]: null },
-                is_deleted: false,
-                status: 'Active'
-            }
-        });
-        const formattedTypes = types.map((item, index) => ({
-            id: index + 1,
-            name: item.getDataValue('name')
-        }));
-        res.status(200).json(formattedTypes);
-    } catch (error) {
-        console.error('Error saat mendapatkan semua tipe:', error);
-        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
-    }
-};
-
-
 // --- FUNGSI UPDATE PRODUCT ---
 const updateProduct = async (req, res) => {
     const t = await sequelize.transaction();
     try {
         const { id } = req.params;
-        const { brand, name, description, price, category, tipe, specifications, variants } = req.body;
+        const { brand, name, description, price, category, typeId, specifications, variants, status } = req.body;
         const product = await Product.findByPk(id, { transaction: t });
         if (!product) {
             await t.rollback();
             return res.status(404).json({ message: 'Produk tidak ditemukan.' });
         }
-        const parsedSpecifications = specifications ? safeParseJSON(specifications) : product.specifications;
-        const parsedVariants = variants ? safeParseJSON(variants) : null;
-
+        
         product.brand = brand || product.brand;
         product.name = name || product.name;
         product.description = description || product.description;
         product.price = price || product.price;
         product.category = category || product.category;
-        product.tipe = tipe || product.tipe;
-        product.specifications = parsedSpecifications;
+        product.typeId = typeId || product.typeId;
+        product.specifications = specifications ? safeParseJSON(specifications) : product.specifications;
+        product.status = status || product.status;
+        
         await product.save({ transaction: t });
 
-        if (parsedVariants) {
-            await ProductVariant.destroy({ where: { productId: id }, transaction: t });
-            const variantData = parsedVariants.map(v => ({
-                size: v.size, stock: v.stock, productId: id,
-            }));
-            await ProductVariant.bulkCreate(variantData, { transaction: t });
+        // Logika untuk memperbarui varian
+        if (variants) {
+            const parsedVariants = safeParseJSON(variants);
+            if (parsedVariants) {
+                await ProductVariant.destroy({ where: { productId: id }, transaction: t });
+                const variantData = parsedVariants.map(v => ({
+                    size: v.size, stock: v.stock, productId: id,
+                }));
+                await ProductVariant.bulkCreate(variantData, { transaction: t });
+            }
         }
+
+        // Logika untuk memperbarui gambar
+        if (req.files && req.files.length > 0) {
+            await ProductImage.destroy({ where: { productId: id }, transaction: t });
+            const newImages = req.files.map(file => ({
+                image_url: file.path.replace(/\\/g, '/'),
+                productId: id,
+            }));
+            await ProductImage.bulkCreate(newImages, { transaction: t });
+        }
+
         await t.commit();
         res.status(200).json({ message: 'Produk berhasil diperbarui' });
     } catch (error) {
@@ -225,7 +232,7 @@ const updateProduct = async (req, res) => {
     }
 };
 
-// --- FUNGSI SOFT DELETE PRODUK ---
+// --- FUNGSI SOFT DELETE PRODUCT ---
 const deleteProduct = async (req, res) => {
     try {
         const { id } = req.params;
@@ -248,5 +255,4 @@ module.exports = {
     getProductById,
     updateProduct,
     deleteProduct,
-    getAllTypes 
 };

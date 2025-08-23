@@ -228,8 +228,15 @@ const getMyOrderById = async (req, res) => {
 const getMyOrders = async (req, res) => {
     try {
         const userId = req.user.id;
+        const { status } = req.query; // Ambil status dari query parameter
+
+        const whereClause = { userId: userId }; // Kondisi wajib: pesanan milik user ini
+        if (status) {
+            whereClause.status = status; // Tambahkan filter status jika ada
+        }
+
         const orders = await Order.findAll({
-            where: { userId },
+            where: whereClause, // Gunakan whereClause yang sudah dinamis
             order: [['createdAt', 'DESC']]
         });
         res.status(200).json(orders);

@@ -1,14 +1,18 @@
 const express = require('express');
 const router = express.Router();
-// --- PERBAIKI DI SINI: Impor semua fungsi yang dibutuhkan ---
+
+// Impor semua fungsi yang diperlukan dari authController
 const { 
-    register, 
-    login, 
-    forgotPassword, 
-    verifyCode, 
-    resetPassword 
+    register, 
+    login, 
+    forgotPassword, 
+    verifyCode, 
+    resetPassword,
+    refreshToken, // Ditambahkan
+    logout       // Ditambahkan
 } = require('../controllers/authController');
-// --- PERBAIKI DI SINI: Impor middleware yang benar ---
+
+// Impor middleware yang benar
 const { protectReset } = require('../middleware/authMiddleware');
 
 // Rute untuk registrasi
@@ -17,6 +21,12 @@ router.post('/register', register);
 // Rute untuk login
 router.post('/login', login);
 
+// --- RUTE BARU: REFRESH TOKEN & LOGOUT ---
+// Rute untuk merefresh access token menggunakan refresh token
+router.post('/refresh', refreshToken);
+
+// Rute untuk logout
+router.post('/logout', logout);
 
 // --- ALUR LUPA PASSWORD 3 LANGKAH ---
 

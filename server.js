@@ -4,7 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const { sequelize, testDbConnection } = require('./src/config/database');
 
-// --- PERBAIKAN 1: Impor Semua Model & Relasinya dari satu tempat ---
+// Impor semua model dan relasinya dari satu tempat
 require('./src/models');
 
 // Impor semua rute
@@ -16,21 +16,24 @@ const cartRoutes = require('./src/routes/cartRoutes');
 const wishlistRoutes = require('./src/routes/wishlistRoutes');
 const orderRoutes = require('./src/routes/orderRoutes');
 const reviewRoutes = require('./src/routes/reviewRoutes');
-const dashboardRoutes = require('./src/routes/dashboardRoutes'); // Ditambahkan
+const dashboardRoutes = require('./src/routes/dashboardRoutes');
 const addressRoutes = require('./src/routes/addressRoutes');
+const typeRoutes = require('./src/routes/typeRoutes'); // DITAMBAHKAN
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- PERBAIKAN 2: Konfigurasi CORS yang lebih lengkap ---
+// Konfigurasi CORS yang Fleksibel untuk Pengembangan
 const allowedOrigins = [
   'http://localhost:5173', // Alamat frontend lokal
-  'https://a565e9923645.ngrok-free.app' // Alamat Ngrok frontend Anda (ganti jika berubah)
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+    // Izinkan jika origin ada di daftar, atau jika origin berakhir dengan .ngrok-free.app
+    const isAllowed = allowedOrigins.includes(origin) || /.*\.ngrok-free\.app$/.test(origin);
+    
+    if (isAllowed || !origin) { // !origin mengizinkan Postman/aplikasi sejenis
       callback(null, true);
     } else {
       callback(new Error('Akses diblokir oleh kebijakan CORS'));
@@ -43,29 +46,29 @@ const corsOptions = {
     'ngrok-skip-browser-warning'
   ],
 };
+
 app.use(cors(corsOptions));
 
+// Middleware untuk parsing body
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// --- PERBAIKAN 3: Middleware untuk file statis diletakkan di atas ---
-// Ini memastikan permintaan gambar dilayani terlebih dahulu.
+// Middleware untuk menyajikan file statis (gambar) dari folder 'uploads'
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Middleware Logger
+// Middleware Logger sederhana
 app.use((req, res, next) => {
-    res.on('finish', () => {
-        if (req.user) {
+    if (req.user) { 
+        res.on('finish', () => {
             console.log(
-                // PERBAIKAN 4: Menggunakan req.user.id
-                `[AKTIVITAS] User ID: ${req.user.id} (Role: ${req.user.role}) mengakses -> ${req.method} ${req.originalUrl}`
+                `[AKTIVITAS] User ID: ${req.user.id} (Role: ${req.user.role}) -> ${req.method} ${req.originalUrl}`
             );
-        }
-    });
+        });
+    }
     next();
 });
 
-// Registrasi Rute
+// Registrasi Semua Rute API
 app.use('/', mainRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -74,14 +77,15 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
-app.use('/api/dashboard', dashboardRoutes); // Rute dasbor ditambahkan
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/addresses', addressRoutes);
+app.use('/api/types', typeRoutes); // DITAMBAHKAN
 
 // Fungsi untuk memulai server
 const startServer = async () => {
     try {
         await testDbConnection();
-        await sequelize.sync({ alter: true });
+        await sequelize.sync({ alter: true }); 
         console.log('Semua model telah disinkronkan. 🔄');
         app.listen(PORT, () => {
             console.log(`Server berjalan di http://localhost:${PORT} 🚀`);
