@@ -13,6 +13,20 @@ exports.getAllTypes = async (req, res) => {
     }
 };
 
+// FUNGSI BARU: Mengambil satu tipe berdasarkan ID
+exports.getTypeById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const type = await Type.findByPk(id);
+        if (!type) {
+            return res.status(404).json({ message: 'Tipe tidak ditemukan.' });
+        }
+        res.status(200).json(type);
+    } catch (error) {
+        res.status(500).json({ message: 'Gagal mengambil data tipe.', error: error.message });
+    }
+};
+
 // Menambah tipe baru
 exports.createType = async (req, res) => {
     try {
@@ -20,6 +34,7 @@ exports.createType = async (req, res) => {
         if (!name) {
             return res.status(400).json({ message: 'Nama tipe harus diisi.' });
         }
+        // Jika status tidak dikirim, defaultnya adalah 'Active' sesuai model
         const newType = await Type.create({ name, status });
         res.status(201).json({ message: 'Tipe baru berhasil ditambahkan.', type: newType });
     } catch (error) {
@@ -30,58 +45,38 @@ exports.createType = async (req, res) => {
     }
 };
 
-// Mengubah status tipe
-exports.updateTypeStatus = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { status } = req.body;
-
-        if (!status || !['Active', 'Inactive'].includes(status)) {
-            return res.status(400).json({ message: "Status harus 'Active' atau 'Inactive'." });
-        }
-
-        const type = await Type.findByPk(id);
-        if (!type) {
-            return res.status(404).json({ message: 'Tipe tidak ditemukan.' });
-        }
-
-        type.status = status;
-        await type.save();
-
-        res.status(200).json({ message: `Status tipe berhasil diubah menjadi ${status}.`, type });
-    } catch (error) {
-        res.status(500).json({ message: 'Gagal mengubah status tipe.', error: error.message });
-    }
-};
-
-// FUNGSI BARU: Update nama tipe
+// FUNGSI DIPERBARUI: Menggabungkan update nama dan status
 exports.updateType = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name } = req.body;
-
-        if (!name) {
-            return res.status(400).json({ message: 'Nama baru harus diisi.' });
-        }
+        const { name, status } = req.body;
 
         const type = await Type.findByPk(id);
         if (!type) {
             return res.status(404).json({ message: 'Tipe tidak ditemukan.' });
         }
 
-        type.name = name;
-        await type.save();
+        // Update nama jika ada di body
+        if (name) {
+            type.name = name;
+        }
 
-        res.status(200).json({ message: 'Nama tipe berhasil diperbarui.', type });
+        // Update status jika ada di body dan nilainya valid
+        if (status && ['Active', 'Inactive'].includes(status)) {
+            type.status = status;
+        }
+
+        await type.save();
+        res.status(200).json({ message: 'Tipe berhasil diperbarui.', type });
     } catch (error) {
         if (error.name === 'SequelizeUniqueConstraintError') {
             return res.status(400).json({ message: 'Nama tipe tersebut sudah digunakan.' });
         }
-        res.status(500).json({ message: 'Gagal memperbarui nama tipe.', error: error.message });
+        res.status(500).json({ message: 'Gagal memperbarui tipe.', error: error.message });
     }
 };
 
-// FUNGSI BARU: Delete tipe
+// Menghapus tipe
 exports.deleteType = async (req, res) => {
     try {
         const { id } = req.params;
