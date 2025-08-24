@@ -1,6 +1,6 @@
 // controllers/productController.js
 
-const { Product, ProductImage, ProductVariant, Type } = require('../models'); // Ditambahkan 'Type'
+const { Product, ProductImage, ProductVariant, Type } = require('../models');
 const { sequelize } = require('../config/database');
 const { Op } = require('sequelize');
 
@@ -91,6 +91,20 @@ const getAllProducts = async (req, res) => {
         if (typeId) { whereClause.typeId = typeId; }
         if (minPrice && maxPrice) { whereClause.price = { [Op.between]: [parseInt(minPrice), parseInt(maxPrice)] }; }
         if (rating) { whereClause.rating = { [Op.gte]: parseFloat(rating) }; }
+        
+        const includeType = {
+            model: Type,
+            as: 'type',
+            attributes: ['name'],
+        };
+
+        // Hanya sertakan produk yang tipenya aktif
+        if (req.user && req.user.role === 'admin') {
+            // Admin bisa melihat semua, tidak perlu filter status tipe
+        } else {
+            includeType.where = { status: 'Active' };
+            includeType.required = true;
+        }
 
         const orderClause = sortBy && order ? [[sortBy, order.toUpperCase()]] : [['createdAt', 'DESC']];
         const pageNum = parseInt(page, 10) || 1;
@@ -101,7 +115,7 @@ const getAllProducts = async (req, res) => {
             where: whereClause,
             include: [
                 { model: ProductImage, as: 'images', attributes: ['image_url'], limit: 1 },
-                { model: Type, as: 'type', attributes: ['name'] }
+                includeType
             ],
             order: orderClause,
             limit: limitNum,
@@ -201,7 +215,6 @@ const updateProduct = async (req, res) => {
         
         await product.save({ transaction: t });
 
-        // Logika untuk memperbarui varian
         if (variants) {
             const parsedVariants = safeParseJSON(variants);
             if (parsedVariants) {
@@ -213,7 +226,6 @@ const updateProduct = async (req, res) => {
             }
         }
 
-        // Logika untuk memperbarui gambar
         if (req.files && req.files.length > 0) {
             await ProductImage.destroy({ where: { productId: id }, transaction: t });
             const newImages = req.files.map(file => ({

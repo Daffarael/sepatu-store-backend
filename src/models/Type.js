@@ -14,6 +14,11 @@ const Type = sequelize.define('Type', {
         allowNull: false,
         unique: true, // Pastikan setiap nama tipe unik
     },
+     status: {
+        type: DataTypes.ENUM('Active', 'Inactive'),
+        defaultValue: 'Active',
+        allowNull: false,
+    },
 }, {
     timestamps: false, // Tabel referensi seperti ini biasanya tidak butuh timestamps
 });
