@@ -18,19 +18,20 @@ const orderRoutes = require('./src/routes/orderRoutes');
 const reviewRoutes = require('./src/routes/reviewRoutes');
 const dashboardRoutes = require('./src/routes/dashboardRoutes');
 const addressRoutes = require('./src/routes/addressRoutes');
-const typeRoutes = require('./src/routes/typeRoutes'); // DITAMBAHKAN
+const typeRoutes = require('./src/routes/typeRoutes');
+const analyticsRoutes = require('./src/routes/analyticsRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Konfigurasi CORS yang Fleksibel untuk Pengembangan
+// --- Konfigurasi CORS yang Fleksibel untuk Pengembangan ---
 const allowedOrigins = [
   'http://localhost:5173', // Alamat frontend lokal
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Izinkan jika origin ada di daftar, atau jika origin berakhir dengan .ngrok-free.app
+    // PERBAIKAN: Izinkan jika origin ada di daftar, ATAU jika origin berasal dari ngrok
     const isAllowed = allowedOrigins.includes(origin) || /.*\.ngrok-free\.app$/.test(origin);
     
     if (isAllowed || !origin) { // !origin mengizinkan Postman/aplikasi sejenis
@@ -48,12 +49,8 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
-// Middleware untuk parsing body
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Middleware untuk menyajikan file statis (gambar) dari folder 'uploads'
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Middleware Logger sederhana
@@ -79,7 +76,8 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/addresses', addressRoutes);
-app.use('/api/types', typeRoutes); // DITAMBAHKAN
+app.use('/api/types', typeRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Fungsi untuk memulai server
 const startServer = async () => {

@@ -1,6 +1,6 @@
-const { Type, Product } = require('../models'); // Ditambahkan 'Product' untuk pengecekan
+const { Type, Product } = require('../models');
 
-// Mendapatkan semua tipe yang statusnya 'Active'
+// Untuk pengguna biasa: Hanya mengambil tipe yang statusnya 'Active'
 exports.getAllTypes = async (req, res) => {
     try {
         const types = await Type.findAll({
@@ -13,7 +13,17 @@ exports.getAllTypes = async (req, res) => {
     }
 };
 
-// FUNGSI BARU: Mengambil satu tipe berdasarkan ID
+// FUNGSI BARU: Untuk admin, mengambil SEMUA tipe
+exports.getAllTypesForAdmin = async (req, res) => {
+    try {
+        const types = await Type.findAll({ order: [['name', 'ASC']] });
+        res.status(200).json(types);
+    } catch (error) {
+        res.status(500).json({ message: 'Gagal mengambil semua data tipe.', error: error.message });
+    }
+};
+
+// Mengambil satu tipe berdasarkan ID
 exports.getTypeById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -27,15 +37,22 @@ exports.getTypeById = async (req, res) => {
     }
 };
 
-// Menambah tipe baru
+// DIPERBARUI: Membuat 'status' menjadi opsional saat create
 exports.createType = async (req, res) => {
     try {
         const { name, status } = req.body;
         if (!name) {
             return res.status(400).json({ message: 'Nama tipe harus diisi.' });
         }
-        // Jika status tidak dikirim, defaultnya adalah 'Active' sesuai model
-        const newType = await Type.create({ name, status });
+
+        const newTypeData = { name };
+        // Hanya tambahkan status jika dikirim oleh frontend
+        if (status) {
+            newTypeData.status = status;
+        }
+        // Jika tidak, biarkan database menggunakan defaultValue ('Active')
+
+        const newType = await Type.create(newTypeData);
         res.status(201).json({ message: 'Tipe baru berhasil ditambahkan.', type: newType });
     } catch (error) {
         if (error.name === 'SequelizeUniqueConstraintError') {
@@ -45,27 +62,21 @@ exports.createType = async (req, res) => {
     }
 };
 
-// FUNGSI DIPERBARUI: Menggabungkan update nama dan status
+// Fungsi update gabungan (nama dan/atau status)
 exports.updateType = async (req, res) => {
     try {
         const { id } = req.params;
         const { name, status } = req.body;
-
         const type = await Type.findByPk(id);
         if (!type) {
             return res.status(404).json({ message: 'Tipe tidak ditemukan.' });
         }
-
-        // Update nama jika ada di body
         if (name) {
             type.name = name;
         }
-
-        // Update status jika ada di body dan nilainya valid
         if (status && ['Active', 'Inactive'].includes(status)) {
             type.status = status;
         }
-
         await type.save();
         res.status(200).json({ message: 'Tipe berhasil diperbarui.', type });
     } catch (error) {
@@ -80,20 +91,15 @@ exports.updateType = async (req, res) => {
 exports.deleteType = async (req, res) => {
     try {
         const { id } = req.params;
-
-        // PENGAMAN: Cek apakah tipe ini masih digunakan oleh produk
         const productInUse = await Product.findOne({ where: { typeId: id } });
         if (productInUse) {
-            return res.status(400).json({ message: 'Tipe ini tidak dapat dihapus karena masih digunakan oleh setidaknya satu produk.' });
+            return res.status(400).json({ message: 'Tipe ini tidak dapat dihapus karena masih digunakan oleh produk.' });
         }
-
         const type = await Type.findByPk(id);
         if (!type) {
             return res.status(404).json({ message: 'Tipe tidak ditemukan.' });
         }
-
         await type.destroy();
-
         res.status(200).json({ message: 'Tipe berhasil dihapus.' });
     } catch (error) {
         res.status(500).json({ message: 'Gagal menghapus tipe.', error: error.message });

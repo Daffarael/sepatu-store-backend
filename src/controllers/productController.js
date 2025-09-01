@@ -1,10 +1,9 @@
 // controllers/productController.js
 
-const { Product, ProductImage, ProductVariant, Type } = require('../models');
+const { Product, ProductImage, ProductVariant, Type, WishlistItem } = require('../models');
 const { sequelize } = require('../config/database');
 const { Op } = require('sequelize');
 
-// Fungsi bantuan untuk mengurai JSON dengan aman
 const safeParseJSON = (jsonString) => {
     try {
         if (jsonString) {
@@ -25,7 +24,6 @@ const createProduct = async (req, res) => {
             brand, name, description, price, variants, typeId, category,
             color, 'Material Atas': materialAtas, 'Material Sol': materialSol, 'Kode SKU': kodeSKU
         } = req.body;
-
         if (!brand || !name || !price || !typeId) {
             await t.rollback();
             return res.status(400).json({ message: 'Brand, nama, harga, dan typeId harus diisi.' });
@@ -52,7 +50,6 @@ const createProduct = async (req, res) => {
             size: v.size, stock: v.stock, productId: newProduct.id,
         }));
         await ProductVariant.bulkCreate(variantData, { transaction: t });
-
         if (req.files && req.files.length > 0) {
             const images = req.files.map(file => ({
                 image_url: file.path.replace(/\\/g, '/'),
@@ -60,7 +57,6 @@ const createProduct = async (req, res) => {
             }));
             await ProductImage.bulkCreate(images, { transaction: t });
         }
-
         await t.commit();
         const createdProductWithDetails = await Product.findByPk(newProduct.id, {
             include: [
@@ -80,10 +76,10 @@ const createProduct = async (req, res) => {
     }
 };
 
-// --- FUNGSI GET ALL PRODUCTS ---
+// --- FUNGSI GET ALL PRODUCTS (UNTUK PUBLIK) ---
 const getAllProducts = async (req, res) => {
     try {
-        const { search, category, typeId, minPrice, maxPrice, rating, sortBy, order, page, limit } = req.query;
+        const { search, category, typeId, typeName, minPrice, maxPrice, rating, sortBy, order, page, limit } = req.query;
         const whereClause = { is_deleted: false, status: 'Active' };
 
         if (search) { whereClause.name = { [Op.like]: `%${search}%` }; }
@@ -96,14 +92,25 @@ const getAllProducts = async (req, res) => {
             model: Type,
             as: 'type',
             attributes: ['name'],
+            where: { status: 'Active' },
+            required: true
         };
+        
+        if (typeName) {
+            if (Array.isArray(typeName)) {
+                includeType.where[Op.or] = typeName.map(name => ({ name: { [Op.like]: `%${name}%` } }));
+            } else {
+                includeType.where.name = { [Op.like]: `%${typeName}%` };
+            }
+        }
 
-        // Hanya sertakan produk yang tipenya aktif
-        if (req.user && req.user.role === 'admin') {
-            // Admin bisa melihat semua, tidak perlu filter status tipe
-        } else {
-            includeType.where = { status: 'Active' };
-            includeType.required = true;
+        let userWishlist = new Set();
+        if (req.user) {
+            const wishlistItems = await WishlistItem.findAll({
+                where: { userId: req.user.id },
+                attributes: ['productId']
+            });
+            userWishlist = new Set(wishlistItems.map(item => item.productId));
         }
 
         const orderClause = sortBy && order ? [[sortBy, order.toUpperCase()]] : [['createdAt', 'DESC']];
@@ -115,7 +122,8 @@ const getAllProducts = async (req, res) => {
             where: whereClause,
             include: [
                 { model: ProductImage, as: 'images', attributes: ['image_url'], limit: 1 },
-                includeType
+                includeType,
+                { model: ProductVariant, as: 'variants', attributes: ['id', 'size', 'stock'] }
             ],
             order: orderClause,
             limit: limitNum,
@@ -125,28 +133,103 @@ const getAllProducts = async (req, res) => {
 
         const formattedProducts = rows.map(product => {
             const productJson = product.toJSON();
-            const mainImage = productJson.images && productJson.images.length > 0
-                ? `${process.env.BASE_URL}/${productJson.images[0].image_url}`
-                : null;
-            return {
-                id: productJson.id,
-                brand: productJson.brand,
-                name: productJson.name,
-                price: productJson.price,
-                rating: productJson.rating,
-                image: mainImage,
-                type: productJson.type
+            const mainImage = productJson.images && productJson.images.length > 0 ? productJson.images[0].image_url : null;
+            return { 
+                id: productJson.id, 
+                brand: productJson.brand, 
+                name: productJson.name, 
+                price: productJson.price, 
+                rating: productJson.rating, 
+                image: mainImage, 
+                type: productJson.type,
+                createdAt: productJson.createdAt,
+                isWishlisted: userWishlist.has(productJson.id),
+                variants: productJson.variants.map(v => ({
+                    variantId: v.id,
+                    size: v.size,
+                    stock: v.stock
+                }))
             };
         });
 
-        res.status(200).json({
-            totalItems: count,
-            totalPages: Math.ceil(count / limitNum),
-            currentPage: pageNum,
-            products: formattedProducts,
-        });
+        res.status(200).json({ totalItems: count, totalPages: Math.ceil(count / limitNum), currentPage: pageNum, products: formattedProducts });
     } catch (error) {
         console.error('Error saat mendapatkan semua produk:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
+};
+
+// --- FUNGSI GET ALL PRODUCTS (UNTUK ADMIN) ---
+const getAllProductsForAdmin = async (req, res) => {
+    try {
+        const { search, category, typeId, typeName, minPrice, maxPrice, sortBy, order, page, limit } = req.query;
+        const whereClause = { is_deleted: false };
+
+        if (search) { whereClause.name = { [Op.like]: `%${search}%` }; }
+        if (category) { whereClause.category = category; }
+        if (typeId) { whereClause.typeId = typeId; }
+        if (minPrice && maxPrice) { whereClause.price = { [Op.between]: [parseInt(minPrice), parseInt(maxPrice)] }; }
+        
+        const includeType = { model: Type, as: 'type', attributes: ['name'] };
+        
+        if (typeName) {
+            if (Array.isArray(typeName)) {
+                includeType.where = { [Op.or]: typeName.map(name => ({ name: { [Op.like]: `%${name}%` } })) };
+            } else {
+                includeType.where = { name: { [Op.like]: `%${typeName}%` } };
+            }
+        }
+        
+        let userWishlist = new Set(); // DIUBAH: dari const ke let
+        const wishlistItems = await WishlistItem.findAll({
+            where: { userId: req.user.id },
+            attributes: ['productId']
+        });
+        userWishlist = new Set(wishlistItems.map(item => item.productId));
+
+        const orderClause = sortBy && order ? [[sortBy, order.toUpperCase()]] : [['createdAt', 'DESC']];
+        const pageNum = parseInt(page, 10) || 1;
+        const limitNum = parseInt(limit, 10) || 10;
+        const offset = (pageNum - 1) * limitNum;
+
+        const { count, rows } = await Product.findAndCountAll({
+            where: whereClause,
+            include: [
+                { model: ProductImage, as: 'images', attributes: ['image_url'], limit: 1 },
+                includeType,
+                { model: ProductVariant, as: 'variants', attributes: ['id', 'size', 'stock'] }
+            ],
+            order: orderClause,
+            limit: limitNum,
+            offset: offset,
+            distinct: true,
+        });
+
+        const formattedProducts = rows.map(product => {
+            const productJson = product.toJSON();
+            const mainImage = productJson.images && productJson.images.length > 0 ? productJson.images[0].image_url : null;
+            return { 
+                id: productJson.id, 
+                brand: productJson.brand, 
+                name: productJson.name, 
+                price: productJson.price, 
+                rating: productJson.rating, 
+                image: mainImage, 
+                type: productJson.type, 
+                status: productJson.status,
+                createdAt: productJson.createdAt,
+                isWishlisted: userWishlist.has(productJson.id),
+                variants: productJson.variants.map(v => ({
+                    variantId: v.id,
+                    size: v.size,
+                    stock: v.stock
+                }))
+            };
+        });
+
+        res.status(200).json({ totalItems: count, totalPages: Math.ceil(count / limitNum), currentPage: pageNum, products: formattedProducts });
+    } catch (error) {
+        console.error('Error saat mendapatkan semua produk untuk admin:', error);
         res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
     }
 };
@@ -155,8 +238,14 @@ const getAllProducts = async (req, res) => {
 const getProductById = async (req, res) => {
     try {
         const { id } = req.params;
+        const whereClause = { id: id, is_deleted: false };
+
+        if (!(req.user && req.user.role === 'admin')) {
+            whereClause.status = 'Active';
+        }
+
         const product = await Product.findOne({
-            where: { id: id, is_deleted: false },
+            where: whereClause,
             include: [
                 { model: ProductImage, as: 'images', attributes: ['image_url'] },
                 { model: ProductVariant, as: 'variants', attributes: ['id', 'size', 'stock'] },
@@ -167,23 +256,39 @@ const getProductById = async (req, res) => {
             return res.status(404).json({ message: 'Produk tidak ditemukan.' });
         }
         
+        let isWishlisted = false;
+        if (req.user) {
+            const wishlistItem = await WishlistItem.findOne({
+                where: {
+                    userId: req.user.id,
+                    productId: product.id
+                }
+            });
+            isWishlisted = !!wishlistItem;
+        }
+
         const productJson = product.toJSON();
         const formattedResponse = {
-            id: productJson.id,
-            brand: productJson.brand,
-            name: productJson.name,
-            price: productJson.price,
-            category: productJson.category,
-            rating: productJson.rating,
-            reviewCount: productJson.reviewCount,
-            sold: productJson.sold,
-            description: productJson.description,
-            type: productJson.type,
-            imageGallery: productJson.images.map(img => `${process.env.BASE_URL}/${img.image_url}`),
-            specifications: productJson.specifications,
-            sizes: productJson.variants.map(v => ({
-                variantId: v.id, size: v.size, stock: v.stock,
+            id: productJson.id, 
+            brand: productJson.brand, 
+            name: productJson.name, 
+            price: productJson.price, 
+            category: productJson.category, 
+            rating: productJson.rating, 
+            reviewCount: productJson.reviewCount, 
+            sold: productJson.sold, 
+            description: productJson.description, 
+            type: productJson.type, 
+            status: productJson.status, 
+            imageGallery: productJson.images.map(img => img.image_url), 
+            specifications: productJson.specifications, 
+            isWishlisted: isWishlisted,
+            variants: productJson.variants.map(v => ({
+                variantId: v.id,
+                size: v.size,
+                stock: v.stock
             })),
+            createdAt: productJson.createdAt
         };
         res.status(200).json(formattedResponse);
     } catch (error) {
@@ -214,7 +319,6 @@ const updateProduct = async (req, res) => {
         product.status = status || product.status;
         
         await product.save({ transaction: t });
-
         if (variants) {
             const parsedVariants = safeParseJSON(variants);
             if (parsedVariants) {
@@ -225,7 +329,6 @@ const updateProduct = async (req, res) => {
                 await ProductVariant.bulkCreate(variantData, { transaction: t });
             }
         }
-
         if (req.files && req.files.length > 0) {
             await ProductImage.destroy({ where: { productId: id }, transaction: t });
             const newImages = req.files.map(file => ({
@@ -234,7 +337,6 @@ const updateProduct = async (req, res) => {
             }));
             await ProductImage.bulkCreate(newImages, { transaction: t });
         }
-
         await t.commit();
         res.status(200).json({ message: 'Produk berhasil diperbarui' });
     } catch (error) {
@@ -264,6 +366,7 @@ const deleteProduct = async (req, res) => {
 module.exports = {
     createProduct,
     getAllProducts,
+    getAllProductsForAdmin,
     getProductById,
     updateProduct,
     deleteProduct,

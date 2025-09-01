@@ -4,8 +4,6 @@ const { WishlistItem, Product, ProductImage } = require('../models');
 // Menambahkan produk ke wishlist
 const addToWishlist = async (req, res) => {
     try {
-        console.log("Body yang diterima untuk addToWishlist:", req.body);
-
         const userId = req.user ? (req.user.id || req.user.userId) : null;
         const { productId } = req.body;
 
@@ -27,7 +25,7 @@ const addToWishlist = async (req, res) => {
     }
 };
 
-// --- FUNGSI GET WISHLIST (DISEMPURNAKAN) ---
+// Melihat semua isi wishlist pengguna (DIPERBARUI)
 const getWishlist = async (req, res) => {
     try {
         const userId = req.user ? (req.user.id || req.user.userId) : null;
@@ -49,15 +47,13 @@ const getWishlist = async (req, res) => {
             }
         });
 
-        // PERBAIKAN: Format ulang respons untuk memperbaiki URL gambar
+        // Format ulang respons agar lebih rapi
         const formattedWishlist = wishlistItems.map(item => {
             const itemJson = item.toJSON();
-            // Cek apakah produk dan gambar ada sebelum diakses
-            const hasProduct = itemJson.Product;
-            const hasImage = hasProduct && hasProduct.images && hasProduct.images.length > 0;
-
-            const mainImage = hasImage
-                ? hasProduct.images[0].image_url.replace(/\\/g, '/')
+            const productData = itemJson.Product;
+            
+            const mainImage = productData && productData.images && productData.images.length > 0
+                ? productData.images[0].image_url.replace(/\\/g, '/')
                 : null;
             
             return {
@@ -66,12 +62,11 @@ const getWishlist = async (req, res) => {
                 updatedAt: itemJson.updatedAt,
                 userId: itemJson.userId,
                 productId: itemJson.productId,
-                Product: hasProduct ? {
-                    id: hasProduct.id,
-                    name: hasProduct.name,
-                    price: hasProduct.price,
-                    // Tambahkan pengecekan gambar di sini juga
-                    images: hasImage ? [{ image_url: mainImage }] : []
+                Product: productData ? {
+                    id: productData.id,
+                    name: productData.name,
+                    price: productData.price,
+                    image: mainImage // Menggunakan format yang lebih sederhana
                 } : null
             };
         });
@@ -82,7 +77,6 @@ const getWishlist = async (req, res) => {
         res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
     }
 };
-
 
 // Menghapus produk dari wishlist
 const removeFromWishlist = async (req, res) => {

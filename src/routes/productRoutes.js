@@ -5,10 +5,10 @@ const router = express.Router();
 const path = require('path');
 const multer = require('multer');
 
-// Impor fungsi controller, 'getAllTypes' sudah dihapus
 const {
     createProduct,
     getAllProducts,
+    getAllProductsForAdmin, // DITAMBAHKAN
     getProductById,
     updateProduct,
     deleteProduct,
@@ -33,14 +33,15 @@ router.put('/:id', protect, isAdmin, upload.array('images', 5), updateProduct);
 router.delete('/:id', protect, isAdmin, deleteProduct);
 
 
-// --- RUTE PUBLIK ---
+// --- RUTE PUBLIK & ADMIN ---
 
-// Rute untuk mendapatkan semua produk
+// RUTE BARU: Untuk admin melihat SEMUA produk (aktif & tidak aktif)
+router.get('/all', protect, isAdmin, getAllProductsForAdmin);
+
+// Rute untuk publik melihat produk yang aktif
 router.get('/', getAllProducts);
 
-// Rute '/types' telah dihapus dari file ini
-
-// Rute untuk mendapatkan detail produk berdasarkan ID
+// Rute untuk detail produk
 router.get('/:id', optionalProtect, getProductById);
 
 
