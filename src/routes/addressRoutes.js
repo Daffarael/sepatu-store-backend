@@ -2,17 +2,27 @@
 
 const express = require('express');
 const router = express.Router();
-const { getMyAddress, addAddress, updateAddress, deleteAddress } = require('../controllers/addressController');
+const {
+    addAddress,
+    getAddresses,
+    updateAddress,
+    deleteAddress,
+    setPrimaryAddress
+} = require('../controllers/addressController');
 const { protect } = require('../middleware/authMiddleware');
 
-// Semua rute di sini memerlukan login
-router.use(protect);
-
-// Rute untuk mengelola satu alamat milik pengguna
+// Rute untuk mendapatkan semua alamat dan menambah alamat baru
 router.route('/')
-    .get(getMyAddress)     // Melihat alamat
-    .post(addAddress)      // Menambah alamat (hanya jika belum ada)
-    .put(updateAddress)    // Memperbarui alamat
-    .delete(deleteAddress);// Menghapus alamat
+    .get(protect, getAddresses)
+    .post(protect, addAddress);
+
+// Rute untuk mengedit dan menghapus alamat berdasarkan ID
+router.route('/:addressId')
+    .put(protect, updateAddress)
+    .delete(protect, deleteAddress);
+
+// Rute untuk menjadikan alamat sebagai alamat utama
+router.put('/:addressId/set-primary', protect, setPrimaryAddress);
 
 module.exports = router;
+

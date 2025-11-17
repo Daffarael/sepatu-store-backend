@@ -4,23 +4,23 @@ const cors = require('cors');
 const path = require('path');
 const { sequelize, testDbConnection } = require('./src/config/database');
 
-// Impor semua model dan relasinya dari satu tempat
-require('./src/models');
+// Impor semua model dan relasinya dari satu tempat             
+require('./src/models');   
 
-// Impor semua rute
+// Impor semua rute 
 const mainRoutes = require('./src/routes/mainRoutes');
 const authRoutes = require('./src/routes/authRoutes');
 const userRoutes = require('./src/routes/userRoutes');
 const productRoutes = require('./src/routes/productRoutes');
 const cartRoutes = require('./src/routes/cartRoutes');
-const wishlistRoutes = require('./src/routes/wishlistRoutes');
-const orderRoutes = require('./src/routes/orderRoutes');
+const wishlistRoutes = require('./src/routes/wishlistRoutes'); 
+const orderRoutes = require('./src/routes/orderRoutes'); 
 const reviewRoutes = require('./src/routes/reviewRoutes');
 const dashboardRoutes = require('./src/routes/dashboardRoutes');
 const addressRoutes = require('./src/routes/addressRoutes');
-const typeRoutes = require('./src/routes/typeRoutes');
+const typeRoutes = require('./src/routes/typeRoutes'); 
 const analyticsRoutes = require('./src/routes/analyticsRoutes');
-
+   
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -39,7 +39,7 @@ const corsOptions = {
     } else {
       callback(new Error('Akses diblokir oleh kebijakan CORS'));
     }
-  },
+  }, 
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: [
     'Content-Type', 
@@ -78,7 +78,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/types', typeRoutes);
 app.use('/api/analytics', analyticsRoutes);
-
+ 
 // Fungsi untuk memulai server
 const startServer = async () => {
     try {

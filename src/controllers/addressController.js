@@ -1,95 +1,144 @@
 // src/controllers/addressController.js
 
-const { Address } = require('../models');
+const { Address, User } = require('../models');
+const { sequelize } = require('../config/database');
 
-// --- FUNGSI DIPERBARUI: Mendapatkan satu alamat milik pengguna ---
-const getMyAddress = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        // Cari satu alamat yang dimiliki oleh pengguna
-        const address = await Address.findOne({ where: { userId } });
-
-        if (!address) {
-            // Jika tidak ada alamat, kirim 404 Not Found
-            return res.status(404).json({ message: 'Alamat tidak ditemukan.' });
-        }
-
-        res.status(200).json(address);
-    } catch (error) {
-        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
-    }
-};
-
-// --- FUNGSI DIPERBARUI: Menambah alamat baru (hanya jika belum ada) ---
+// Menambah alamat baru
 const addAddress = async (req, res) => {
     try {
         const userId = req.user.id;
+        const { recipientName, phoneNumber, streetAddress, village, district, city, province, isPrimary } = req.body;
 
-        // Cek apakah pengguna sudah memiliki alamat
-        const existingAddress = await Address.findOne({ where: { userId } });
-        if (existingAddress) {
-            return res.status(400).json({ 
-                message: 'Anda sudah memiliki alamat. Silakan gunakan metode PUT untuk memperbarui.' 
-            });
+        if (!recipientName || !phoneNumber || !streetAddress || !city || !province) {
+            return res.status(400).json({ message: 'Nama, nomor telepon, alamat jalan, kota, dan provinsi harus diisi.' });
         }
 
-        const {
-            recipientName, phoneNumber, province, city,
-            district, village, streetAddress, details
-        } = req.body;
+        // Jika alamat baru ini adalah utama, nonaktifkan yang lain
+        if (isPrimary) {
+            await Address.update({ isPrimary: false }, { where: { userId } });
+        }
 
         const newAddress = await Address.create({
-            userId, recipientName, phoneNumber, province, city,
-            district, village, streetAddress, details
+            userId,
+            recipientName,
+            phoneNumber,
+            streetAddress,
+            village,
+            district,
+            city,
+            province,
+            isPrimary: isPrimary || false
         });
 
-        res.status(201).json({ message: 'Alamat baru berhasil ditambahkan.', address: newAddress });
+        res.status(201).json({ message: 'Alamat berhasil ditambahkan.', address: newAddress });
     } catch (error) {
         res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
     }
 };
 
-// --- FUNGSI DIPERBARUI: Memperbarui alamat yang sudah ada ---
-const updateAddress = async (req, res) => {
+// Mendapatkan semua alamat milik pengguna
+const getAddresses = async (req, res) => {
     try {
         const userId = req.user.id;
-        
-        // Cari alamat berdasarkan userId, bukan addressId, karena pengguna hanya punya satu
-        const address = await Address.findOne({ where: { userId } });
-
-        if (!address) {
-            return res.status(404).json({ message: 'Alamat tidak ditemukan untuk diperbarui.' });
-        }
-
-        await address.update(req.body);
-
-        res.status(200).json({ message: 'Alamat berhasil diperbarui.', address: address });
+        const addresses = await Address.findAll({ where: { userId } });
+        res.status(200).json(addresses);
     } catch (error) {
         res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
     }
 };
 
-// --- FUNGSI DIPERBARUI: Menghapus alamat yang sudah ada ---
+// Memperbarui alamat
+const updateAddress = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const userId = req.user.id;
+        const { addressId } = req.params;
+        const { recipientName, phoneNumber, streetAddress, village, district, city, province, isPrimary } = req.body;
+
+        const address = await Address.findOne({ where: { id: addressId, userId: userId } });
+        if (!address) {
+            await t.rollback();
+            return res.status(404).json({ message: 'Alamat tidak ditemukan.' });
+        }
+
+        // Jika alamat ini akan dijadikan utama, nonaktifkan yang lain dulu
+        if (isPrimary) {
+            await Address.update({ isPrimary: false }, { where: { userId }, transaction: t });
+        }
+        
+        // Perbarui field yang ada di body
+        address.recipientName = recipientName || address.recipientName;
+        address.phoneNumber = phoneNumber || address.phoneNumber;
+        address.streetAddress = streetAddress || address.streetAddress;
+        address.village = village || address.village;
+        address.district = district || address.district;
+        address.city = city || address.city;
+        address.province = province || address.province;
+        // Hanya update isPrimary jika nilainya secara eksplisit dikirim (true atau false)
+        if (isPrimary !== undefined) {
+            address.isPrimary = isPrimary;
+        }
+
+        await address.save({ transaction: t });
+        await t.commit();
+        res.status(200).json({ message: 'Alamat berhasil diperbarui.', address });
+
+    } catch (error) {
+        await t.rollback();
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
+};
+
+// Menghapus alamat
 const deleteAddress = async (req, res) => {
     try {
         const userId = req.user.id;
+        const { addressId } = req.params;
 
-        // Hapus alamat berdasarkan userId
-        const result = await Address.destroy({ where: { userId } });
-
-        if (result === 0) {
-            return res.status(404).json({ message: 'Alamat tidak ditemukan untuk dihapus.' });
+        const address = await Address.findOne({ where: { id: addressId, userId: userId } });
+        if (!address) {
+            return res.status(404).json({ message: 'Alamat tidak ditemukan.' });
         }
 
+        await address.destroy();
         res.status(200).json({ message: 'Alamat berhasil dihapus.' });
     } catch (error) {
         res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
     }
 };
 
+// Menjadikan alamat sebagai alamat utama
+const setPrimaryAddress = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const userId = req.user.id;
+        const { addressId } = req.params;
+
+        // 1. Nonaktifkan semua alamat utama yang lain
+        await Address.update({ isPrimary: false }, { where: { userId }, transaction: t });
+
+        // 2. Aktifkan alamat yang dipilih sebagai utama
+        const [updatedRows] = await Address.update({ isPrimary: true }, { where: { id: addressId, userId: userId }, transaction: t });
+
+        if (updatedRows === 0) {
+            await t.rollback();
+            return res.status(404).json({ message: 'Alamat tidak ditemukan.' });
+        }
+
+        await t.commit();
+        res.status(200).json({ message: 'Alamat utama berhasil diubah.' });
+
+    } catch (error) {
+        await t.rollback();
+        res.status(500).json({ message: 'Terjadi kesalahan pada server', error: error.message });
+    }
+};
+
+
 module.exports = {
-    getMyAddress,
     addAddress,
+    getAddresses,
     updateAddress,
-    deleteAddress
+    deleteAddress,
+    setPrimaryAddress
 };
